@@ -43,6 +43,13 @@ class NuScenesDataset(Dataset):
 
         super().__init__(root, transform)
 
+    def setup(self, stage: Optional[str] = None):
+        """Called on every GPU. Instantiate datasets here."""
+        if stage in (None, "fit"):
+            self.train_dataset = NuScenesDataset(os.path.join(self.root, "train"))
+            self.val_dataset = NuScenesDataset(os.path.join(self.root, "val"))
+
+
     def len(self) -> int:
         return len(self.data_list)
 
