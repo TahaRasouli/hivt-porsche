@@ -43,7 +43,7 @@ class NuScenesDataset(Dataset):
         self.data_list: List = []
         for f in self.pt_files:
             with torch.serialization.safe_globals([TemporalData, Data]):
-                self.data_list.append(torch.load(f))
+                self.data_list.append(torch.load(f, weights_only=False))
 
         super().__init__(root, transform)
 
