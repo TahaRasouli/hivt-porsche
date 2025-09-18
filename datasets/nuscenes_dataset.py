@@ -24,18 +24,51 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
     return samples
 
 class NuScenesDataset(Dataset):
-    """Loads preprocessed .pt files from a folder."""
-    def __init__(self, root: str):
-        self.pt_files = sorted(glob.glob(os.path.join(root, "*.pt")))
-        if not self.pt_files:
-            raise FileNotFoundError(f"No preprocessed .pt files found in {root}")
-        self.data_list = [torch.load(f) for f in self.pt_files]
+    def __init__(self, root: str, split: str = "train", transform=None):
+        """
+        root: path to the dataset (should contain ./train/processed/ or ./val/processed/)
+        split: 'train' or 'val'
+        transform: optional transform
+        """
+        self.root = root
+        self.split = split
+        self.transform = transform
 
-    def __len__(self):
+        self.processed_dir = os.path.join(root, split, "processed")
+        if not os.path.exists(self.processed_dir):
+            raise FileNotFoundError(
+                f"No processed directory found at {self.processed_dir}. "
+                "Make sure your .pt files are here."
+            )
+
+        # Get all .pt files
+        self.pt_files = sorted([
+            os.path.join(self.processed_dir, f)
+            for f in os.listdir(self.processed_dir)
+            if f.endswith(".pt")
+        ])
+        if len(self.pt_files) == 0:
+            raise FileNotFoundError(f"No .pt files found in {self.processed_dir}")
+
+        print(f"[NuScenesDataset] Loading {len(self.pt_files)} preprocessed samples from {self.processed_dir}")
+
+        # Load all .pt files safely
+        self.data_list: List[TemporalData] = []
+        for f in self.pt_files:
+            with torch.serialization.safe_globals([TemporalData]):
+                data = torch.load(f)
+            self.data_list.append(data)
+
+        super().__init__(root, transform)
+
+    def len(self) -> int:
         return len(self.data_list)
 
-    def __getitem__(self, idx):
-        return self.data_list[idx]
+    def get(self, idx: int):
+        data = self.data_list[idx]
+        if self.transform:
+            data = self.transform(data)
+        return data
 
 
 def process_nuscenes(nusc: NuScenes,
