@@ -25,36 +25,26 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
 
 
 class NuScenesDataset(Dataset):
-    def __init__(self,
-                 root: str,
-                 split: str,
-                 transform: Optional[Callable] = None,
-                 local_radius: float = 50.0) -> None:
-        """
-        NuScenes -> HiVT style dataset.
-        """
-        self._split = split
-        self._local_radius = local_radius
-        self.root = root  # use path from train.py
-        self.version = "v1.0-trainval"
+    def __init__(self, root, split="train", transform=None,
+                 local_radius=50.0, dry_run=False, rebuild=False):
+        self.split = split
+        self.local_radius = local_radius
+        self.dry_run = dry_run
+        self.pt_path = os.path.join(root, split, "data.pt")
 
-        self.nusc = NuScenes(version=self.version, dataroot=self.root, verbose=False)
-
-        num_scenes = len(self.nusc.scene)
-        split_idx = int(num_scenes * 0.7)
-        if split == "train":
-            scene_records = self.nusc.scene[:split_idx]
-        elif split == "val":
-            scene_records = self.nusc.scene[split_idx:]
+        # If preprocessed file exists and rebuild=False -> load only
+        if os.path.exists(self.pt_path) and not rebuild:
+            print(f"[NuScenesDataset] Loading preprocessed {split} data from {self.pt_path}")
+            self.data_list = torch.load(self.pt_path)
         else:
-            raise ValueError(f"Unsupported split: {split}")
+            print(f"[NuScenesDataset] No preprocessed data found. You need the raw NuScenes dataset.")
+            raise FileNotFoundError(
+                f"No preprocessed file found at {self.pt_path}. "
+                "Please either copy your .pt files here or enable raw preprocessing."
+            )
 
-        self.scenes = scene_records
-        self._processed_file_names = [f"{scene['name']}.pt" for scene in self.scenes]
-        self._processed_paths = [os.path.join(self.processed_dir, f) for f in self._processed_file_names]
-
-        super(NuScenesDataset, self).__init__(root, transform=transform)
-
+        super().__init__(root, transform)
+        
     @property
     def processed_dir(self) -> str:
         return os.path.join(self.root, self._split, "processed")
