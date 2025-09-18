@@ -23,17 +23,19 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
         token = s["next"]
     return samples
 
+import os
+from typing import List
+import torch
+from torch_geometric.data import Dataset
+from utils import TemporalData  # ensure this matches your saved class
+
 class NuScenesDataset(Dataset):
     def __init__(self, root: str, split: str = "train", transform=None):
-        """
-        root: path to the dataset (should contain ./train/processed/ or ./val/processed/)
-        split: 'train' or 'val'
-        transform: optional transform
-        """
         self.root = root
         self.split = split
         self.transform = transform
 
+        # Use a normal attribute instead of property
         self.processed_dir = os.path.join(root, split, "processed")
         if not os.path.exists(self.processed_dir):
             raise FileNotFoundError(
@@ -41,7 +43,6 @@ class NuScenesDataset(Dataset):
                 "Make sure your .pt files are here."
             )
 
-        # Get all .pt files
         self.pt_files = sorted([
             os.path.join(self.processed_dir, f)
             for f in os.listdir(self.processed_dir)
@@ -52,23 +53,20 @@ class NuScenesDataset(Dataset):
 
         print(f"[NuScenesDataset] Loading {len(self.pt_files)} preprocessed samples from {self.processed_dir}")
 
-        # Load all .pt files safely
-        self.data_list: List[TemporalData] = []
+        # Safe load with TemporalData allowlist
+        self.data_list: List = []
         for f in self.pt_files:
             with torch.serialization.safe_globals([TemporalData]):
-                data = torch.load(f)
-            self.data_list.append(data)
+                self.data_list.append(torch.load(f))
 
         super().__init__(root, transform)
 
     def len(self) -> int:
         return len(self.data_list)
 
-    def get(self, idx: int):
-        data = self.data_list[idx]
-        if self.transform:
-            data = self.transform(data)
-        return data
+    def get(self, idx) -> torch.Tensor:
+        return self.data_list[idx]
+
 
 
 def process_nuscenes(nusc: NuScenes,
