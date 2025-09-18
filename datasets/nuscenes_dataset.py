@@ -6,28 +6,10 @@ import numpy as np
 import torch
 from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
-
 from nuscenes.nuscenes import NuScenes
 from nuscenes.map_expansion.map_api import NuScenesMap
-
 from utils import TemporalData  # make sure your TemporalData signature matches
 
-
-def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
-    """Collect all sample dicts in the scene (ordered)."""
-    samples = []
-    token = first_sample_token
-    while token:
-        s = nusc.get("sample", token)
-        samples.append(s)
-        token = s["next"]
-    return samples
-
-import os
-from typing import List
-import torch
-from torch_geometric.data import Dataset
-from utils import TemporalData  # ensure this matches your saved class
 
 class NuScenesDataset(Dataset):
     def __init__(self, root: str, split: str = "train", transform=None):
@@ -35,23 +17,23 @@ class NuScenesDataset(Dataset):
         self.split = split
         self.transform = transform
 
-        # Use a normal attribute instead of property
-        self.processed_dir = os.path.join(root, split, "processed")
-        if not os.path.exists(self.processed_dir):
+        # Use a normal attribute (avoid property conflict)
+        self._processed_dir = os.path.join(root, "processed")
+        if not os.path.exists(self._processed_dir):
             raise FileNotFoundError(
-                f"No processed directory found at {self.processed_dir}. "
+                f"No processed directory found at {self._processed_dir}. "
                 "Make sure your .pt files are here."
             )
 
         self.pt_files = sorted([
-            os.path.join(self.processed_dir, f)
-            for f in os.listdir(self.processed_dir)
+            os.path.join(self._processed_dir, f)
+            for f in os.listdir(self._processed_dir)
             if f.endswith(".pt")
         ])
         if len(self.pt_files) == 0:
-            raise FileNotFoundError(f"No .pt files found in {self.processed_dir}")
+            raise FileNotFoundError(f"No .pt files found in {self._processed_dir}")
 
-        print(f"[NuScenesDataset] Loading {len(self.pt_files)} preprocessed samples from {self.processed_dir}")
+        print(f"[NuScenesDataset] Loading {len(self.pt_files)} preprocessed samples from {self._processed_dir}")
 
         # Safe load with TemporalData allowlist
         self.data_list: List = []
@@ -67,7 +49,20 @@ class NuScenesDataset(Dataset):
     def get(self, idx) -> torch.Tensor:
         return self.data_list[idx]
 
+    @property
+    def processed_dir(self):
+        return self._processed_dir
 
+
+def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
+    """Collect all sample dicts in the scene (ordered)."""
+    samples = []
+    token = first_sample_token
+    while token:
+        s = nusc.get("sample", token)
+        samples.append(s)
+        token = s["next"]
+    return samples
 
 def process_nuscenes(nusc: NuScenes,
                      scene: Dict,
