@@ -24,31 +24,17 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
     return samples
 
 class NuScenesDataset(Dataset):
-    """
-    PyTorch Geometric Dataset for preprocessed NuScenes data stored as .pt files.
-    Expects:
-        ./root/train/data.pt
-        ./root/val/data.pt
-    """
-    def __init__(self, root, split="train", transform=None):
-        self.split = split
-        self.pt_path = os.path.join(root, split, "data.pt")
+    """Loads preprocessed .pt files from a folder."""
+    def __init__(self, root: str):
+        self.pt_files = sorted(glob.glob(os.path.join(root, "*.pt")))
+        if not self.pt_files:
+            raise FileNotFoundError(f"No preprocessed .pt files found in {root}")
+        self.data_list = [torch.load(f) for f in self.pt_files]
 
-        if not os.path.exists(self.pt_path):
-            raise FileNotFoundError(
-                f"No preprocessed file found at {self.pt_path}. "
-                "Please copy your .pt files here."
-            )
-
-        print(f"[NuScenesDataset] Loading preprocessed {split} data from {self.pt_path}")
-        self.data_list = torch.load(self.pt_path)
-        super().__init__(root, transform)
-
-    def len(self):
+    def __len__(self):
         return len(self.data_list)
 
-    def get(self, idx):
-        """Return a single sample as a PyTorch Geometric Data object or TemporalData object."""
+    def __getitem__(self, idx):
         return self.data_list[idx]
 
 
