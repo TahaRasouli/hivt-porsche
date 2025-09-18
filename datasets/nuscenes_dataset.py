@@ -10,14 +10,17 @@ from nuscenes.nuscenes import NuScenes
 from nuscenes.map_expansion.map_api import NuScenesMap
 from utils import TemporalData  # make sure your TemporalData signature matches
 
-
 class NuScenesDataset(Dataset):
     def __init__(self, root: str, split: str = "train", transform=None):
+        """
+        root: path to ./datasets/train or ./datasets/val
+        split: "train" or "val"
+        """
         self.root = root
         self.split = split
         self.transform = transform
 
-        # Use a normal attribute (avoid property conflict)
+        # Correct processed folder
         self._processed_dir = os.path.join(root, "processed")
         if not os.path.exists(self._processed_dir):
             raise FileNotFoundError(
@@ -43,23 +46,15 @@ class NuScenesDataset(Dataset):
 
         super().__init__(root, transform)
 
-    def setup(self, stage: Optional[str] = None):
-        """Called on every GPU. Instantiate datasets here."""
-        if stage in (None, "fit"):
-            self.train_dataset = NuScenesDataset(os.path.join(self.root, "train"))
-            self.val_dataset = NuScenesDataset(os.path.join(self.root, "val"))
-
-
     def len(self) -> int:
         return len(self.data_list)
 
-    def get(self, idx) -> torch.Tensor:
+    def get(self, idx) -> TemporalData:
         return self.data_list[idx]
 
     @property
     def processed_dir(self):
         return self._processed_dir
-
 
 def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
     """Collect all sample dicts in the scene (ordered)."""

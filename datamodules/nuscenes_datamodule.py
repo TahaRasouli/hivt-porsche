@@ -37,8 +37,9 @@ class NuScenesDataModule(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None):
         if stage in (None, "fit"):
-            self.train_dataset = NuScenesDataset(os.path.join(self.root, "train", "processed"))
-            self.val_dataset = NuScenesDataset(os.path.join(self.root, "val", "processed"))
+            # Only pass the split folder (train/val), dataset handles 'processed' internally
+            self.train_dataset = NuScenesDataset(os.path.join(self.root, "train"))
+            self.val_dataset = NuScenesDataset(os.path.join(self.root, "val"))
 
     def train_dataloader(self):
         return DataLoader(
