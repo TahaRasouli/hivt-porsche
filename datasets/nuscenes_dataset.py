@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import glob
 import numpy as np
 import torch
-from torch_geometric.data import Data, Dataset, DataEdgeAttr
+from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
 from nuscenes.nuscenes import NuScenes
 from nuscenes.map_expansion.map_api import NuScenesMap
@@ -42,7 +42,7 @@ class NuScenesDataset(Dataset):
         # Safe load with TemporalData allowlist
         self.data_list: List = []
         for f in self.pt_files:
-            with torch.serialization.safe_globals([TemporalData, DataEdgeAttr]):
+            with torch.serialization.safe_globals([TemporalData, Data]):
                 self.data_list.append(torch.load(f))
 
         super().__init__(root, transform)
