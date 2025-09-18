@@ -9,7 +9,7 @@ from datasets.nuscenes_dataset import NuScenesDataset
 
 class NuScenesDataModule(pl.LightningDataModule):
     def __init__(self,
-                 root: str = "/mnt/d/projects/datasets/NuScenes/v1.0-trainval",
+                 root: str = "./dataset",   # point to where your preprocessed .pt files live
                  train_batch_size: int = 4,
                  val_batch_size: int = 4,
                  num_workers: int = 4,
@@ -31,15 +31,15 @@ class NuScenesDataModule(pl.LightningDataModule):
         self.val_transform = None
 
     def prepare_data(self):
-        """Called only on 1 GPU to download/process data."""
-        # Trigger processing of datasets
-        _ = NuScenesDataset(root=self.root, split="train", transform=self.train_transform,
-                            local_radius=self.local_radius)
-        _ = NuScenesDataset(root=self.root, split="val", transform=self.val_transform,
-                            local_radius=self.local_radius)
+        """Check if preprocessed data exists (skip NuScenes raw loading)."""
+        train_path = os.path.join(self.root, "train")
+        val_path = os.path.join(self.root, "val")
+        assert os.path.exists(train_path), f"Preprocessed train dir not found: {train_path}"
+        assert os.path.exists(val_path), f"Preprocessed val dir not found: {val_path}"
+        print(f"✅ Found preprocessed data at {train_path} and {val_path}")
 
     def setup(self, stage: Optional[str] = None):
-        """Called on every GPU. Instantiate datasets here."""
+        """Instantiate datasets from preprocessed files."""
         if stage in (None, "fit"):
             self.train_dataset = NuScenesDataset(
                 root=self.root,
