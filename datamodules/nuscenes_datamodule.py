@@ -8,51 +8,43 @@ from datasets.nuscenes_dataset import NuScenesDataset
 
 
 class NuScenesDataModule(pl.LightningDataModule):
+    """
+    LightningDataModule for loading preprocessed NuScenes data stored as .pt files.
+    Assumes:
+        ./datasets/train/data.pt
+        ./datasets/val/data.pt
+    """
     def __init__(self,
-                 root: str = "./dataset",   # point to where your preprocessed .pt files live
-                 train_batch_size: int = 4,
-                 val_batch_size: int = 4,
+                 root: str = "./datasets",
+                 train_batch_size: int = 32,
+                 val_batch_size: int = 32,
                  num_workers: int = 4,
-                 local_radius: float = 50.0,
                  shuffle: bool = True):
         super().__init__()
         self.root = root
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size
         self.num_workers = num_workers
-        self.local_radius = local_radius
         self.shuffle = shuffle
 
         self.train_dataset = None
         self.val_dataset = None
 
-        # Placeholders for optional transforms (identity by default)
-        self.train_transform = None
-        self.val_transform = None
-
     def prepare_data(self):
-        """Check if preprocessed data exists (skip NuScenes raw loading)."""
-        train_path = os.path.join(self.root, "train")
-        val_path = os.path.join(self.root, "val")
-        assert os.path.exists(train_path), f"Preprocessed train dir not found: {train_path}"
-        assert os.path.exists(val_path), f"Preprocessed val dir not found: {val_path}"
+        """No raw dataset preprocessing required, just check files exist."""
+        train_path = os.path.join(self.root, "train", "data.pt")
+        val_path = os.path.join(self.root, "val", "data.pt")
+        if not os.path.exists(train_path):
+            raise FileNotFoundError(f"No preprocessed train file found at {train_path}")
+        if not os.path.exists(val_path):
+            raise FileNotFoundError(f"No preprocessed val file found at {val_path}")
         print(f"✅ Found preprocessed data at {train_path} and {val_path}")
 
     def setup(self, stage: Optional[str] = None):
-        """Instantiate datasets from preprocessed files."""
+        """Called on every GPU. Instantiate datasets here."""
         if stage in (None, "fit"):
-            self.train_dataset = NuScenesDataset(
-                root=self.root,
-                split="train",
-                transform=self.train_transform,
-                local_radius=self.local_radius
-            )
-            self.val_dataset = NuScenesDataset(
-                root=self.root,
-                split="val",
-                transform=self.val_transform,
-                local_radius=self.local_radius
-            )
+            self.train_dataset = NuScenesDataset(root=self.root, split="train")
+            self.val_dataset = NuScenesDataset(root=self.root, split="val")
 
     def train_dataloader(self):
         return DataLoader(

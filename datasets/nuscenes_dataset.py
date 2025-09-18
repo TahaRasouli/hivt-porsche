@@ -23,59 +23,33 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
         token = s["next"]
     return samples
 
-
 class NuScenesDataset(Dataset):
-    def __init__(self, root, split="train", transform=None,
-                 local_radius=50.0, dry_run=False, rebuild=False):
+    """
+    PyTorch Geometric Dataset for preprocessed NuScenes data stored as .pt files.
+    Expects:
+        ./root/train/data.pt
+        ./root/val/data.pt
+    """
+    def __init__(self, root, split="train", transform=None):
         self.split = split
-        self.local_radius = local_radius
-        self.dry_run = dry_run
         self.pt_path = os.path.join(root, split, "data.pt")
 
-        # If preprocessed file exists and rebuild=False -> load only
-        if os.path.exists(self.pt_path) and not rebuild:
-            print(f"[NuScenesDataset] Loading preprocessed {split} data from {self.pt_path}")
-            self.data_list = torch.load(self.pt_path)
-        else:
-            print(f"[NuScenesDataset] No preprocessed data found. You need the raw NuScenes dataset.")
+        if not os.path.exists(self.pt_path):
             raise FileNotFoundError(
                 f"No preprocessed file found at {self.pt_path}. "
-                "Please either copy your .pt files here or enable raw preprocessing."
+                "Please copy your .pt files here."
             )
 
+        print(f"[NuScenesDataset] Loading preprocessed {split} data from {self.pt_path}")
+        self.data_list = torch.load(self.pt_path)
         super().__init__(root, transform)
-        
-    @property
-    def processed_dir(self) -> str:
-        return os.path.join(self.root, self._split, "processed")
 
-    @property
-    def processed_file_names(self) -> Union[str, List[str], Tuple]:
-        return self._processed_file_names
+    def len(self):
+        return len(self.data_list)
 
-    @property
-    def processed_paths(self) -> List[str]:
-        return self._processed_paths
-
-    def process(self) -> None:
-        os.makedirs(self.processed_dir, exist_ok=True)
-        for scene in tqdm(self.scenes, desc=f"Processing {self._split}"):
-            try:
-                kwargs = process_nuscenes(self.nusc, scene, self._local_radius)
-                if kwargs is None:
-                    raise RuntimeError("process_nuscenes returned None")
-            except Exception as e:
-                print(f"Skipping scene {scene['name']}: {e}")
-                continue
-            data = TemporalData(**kwargs)
-            out_path = os.path.join(self.processed_dir, str(kwargs["seq_id"]) + ".pt")
-            torch.save(data, out_path)
-
-    def len(self) -> int:
-        return len(self.scenes)
-
-    def get(self, idx) -> Data:
-        return torch.load(self.processed_paths[idx])
+    def get(self, idx):
+        """Return a single sample as a PyTorch Geometric Data object or TemporalData object."""
+        return self.data_list[idx]
 
 
 def process_nuscenes(nusc: NuScenes,
