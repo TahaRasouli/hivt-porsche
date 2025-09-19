@@ -38,6 +38,12 @@ class NuScenesDataset(Dataset):
             raise FileNotFoundError(f"No .pt files found in {self._processed_dir}")
 
         print(f"[NuScenesDataset] Loading {len(self.pt_files)} preprocessed samples from {self._processed_dir}")
+        print(f"First file content type: {type(self.data_list[0])}")
+        if isinstance(self.data_list[0], str):
+            print(f"First few characters: {self.data_list[0][:100]}")
+        else:
+            print(f"First item keys (if dict): {self.data_list[0].keys() if isinstance(self.data_list[0], dict) else 'Not a dict'}")
+
 
         # Safe load with TemporalData allowlist
         self.data_list: List = []
