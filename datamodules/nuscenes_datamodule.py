@@ -1,9 +1,18 @@
 from torch_geometric.loader import DataLoader as GeoDataLoader
+from torch_geometric.data import Batch
 import pytorch_lightning as pl
 import os
 from typing import Optional
 from datasets.nuscenes_dataset import NuScenesDataset
 
+def pyg_collate_fn(batch):
+    # If batch is already a Batch, just return it
+    if isinstance(batch, Batch):
+        return batch
+    # If it's a list of Data objects, turn into Batch
+    if isinstance(batch, list) and all(hasattr(x, 'num_nodes') for x in batch):
+        return Batch.from_data_list(batch)
+    raise TypeError(f"Unexpected batch type: {type(batch)}")
 
 class NuScenesDataModule(pl.LightningDataModule):
     def __init__(
@@ -40,6 +49,7 @@ class NuScenesDataModule(pl.LightningDataModule):
             batch_size=self.train_batch_size,
             shuffle=self.shuffle,
             num_workers=self.num_workers,
+            collate_fn=pyg_collate_fn
         )
 
     def val_dataloader(self):
@@ -48,4 +58,5 @@ class NuScenesDataModule(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=pyg_collate_fn
         )
