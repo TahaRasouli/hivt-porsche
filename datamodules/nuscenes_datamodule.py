@@ -41,6 +41,7 @@ class NuScenesDataModule(pl.LightningDataModule):
             self.train_dataset = NuScenesDataset(os.path.join(self.root, "train"))
             self.val_dataset = NuScenesDataset(os.path.join(self.root, "val"))
 
+
     def train_dataloader(self):
         return GeoDataLoader(
             self.train_dataset,
@@ -48,6 +49,7 @@ class NuScenesDataModule(pl.LightningDataModule):
             shuffle=self.shuffle,
             num_workers=self.num_workers,
             persistent_workers=True,
+            collate_fn=lambda data_list: Batch.from_data_list(data_list),  # 👈 fix
         )
 
     def val_dataloader(self):
@@ -57,4 +59,5 @@ class NuScenesDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             persistent_workers=True,
+            collate_fn=lambda data_list: Batch.from_data_list(data_list),  # 👈 fix
         )
