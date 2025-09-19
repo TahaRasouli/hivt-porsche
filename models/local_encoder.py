@@ -153,7 +153,6 @@ class AAEncoder(MessagePassing):
 # MultiheadAttention blocks without inplace operations, and lane embeddings handled properly.
 
 class TemporalEncoder(nn.Module):
-
     def __init__(self,
                  historical_steps: int,
                  embed_dim: int,
@@ -161,14 +160,16 @@ class TemporalEncoder(nn.Module):
                  num_layers: int = 4,
                  dropout: float = 0.1) -> None:
         super(TemporalEncoder, self).__init__()
+        self.max_seq_len = historical_steps
         encoder_layer = TemporalEncoderLayer(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer=encoder_layer, num_layers=num_layers,
                                                          norm=nn.LayerNorm(embed_dim))
+        
+        # Create tensors for maximum expected sequence length
         self.padding_token = nn.Parameter(torch.Tensor(historical_steps, 1, embed_dim))
         self.cls_token = nn.Parameter(torch.Tensor(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.Tensor(historical_steps + 1, 1, embed_dim))
-        attn_mask = self.generate_square_subsequent_mask(historical_steps + 1)
-        self.register_buffer('attn_mask', attn_mask)
+        
         nn.init.normal_(self.padding_token, mean=0., std=.02)
         nn.init.normal_(self.cls_token, mean=0., std=.02)
         nn.init.normal_(self.pos_embed, mean=0., std=.02)
@@ -177,19 +178,40 @@ class TemporalEncoder(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 padding_mask: torch.Tensor) -> torch.Tensor:
-        x = torch.where(padding_mask.t().unsqueeze(-1), self.padding_token, x)
-        expand_cls_token = self.cls_token.expand(-1, x.shape[1], -1)
-        x = torch.cat((x, expand_cls_token), dim=0)
-        x = x + self.pos_embed
-        out = self.transformer_encoder(src=x, mask=self.attn_mask, src_key_padding_mask=None)
-        return out[-1]  # [N, D]
+        # x shape: [actual_seq_len, batch_size, embed_dim]
+        actual_seq_len = x.shape[0]
+        batch_size = x.shape[1]
+        
+        # Handle variable sequence lengths by using only what we need
+        if actual_seq_len <= self.max_seq_len:
+            # Use subset of parameters for shorter sequences
+            padding_token = self.padding_token[:actual_seq_len]
+            pos_embed = self.pos_embed[:actual_seq_len + 1]
+            
+            # Apply padding
+            x = torch.where(padding_mask.t().unsqueeze(-1), padding_token, x)
+            
+            # Add cls token
+            expand_cls_token = self.cls_token.expand(-1, batch_size, -1)
+            x = torch.cat((x, expand_cls_token), dim=0)
+            
+            # Add positional embeddings
+            x = x + pos_embed
+            
+            # Generate attention mask for current length
+            attn_mask = self.generate_square_subsequent_mask(actual_seq_len + 1).to(x.device)
+        else:
+            # Handle sequences longer than expected (shouldn't happen with your data)
+            raise ValueError(f"Sequence length {actual_seq_len} exceeds maximum {self.max_seq_len}")
+        
+        out = self.transformer_encoder(src=x, mask=attn_mask, src_key_padding_mask=None)
+        return out[-1]  # [N, D] - return cls token
 
     @staticmethod
     def generate_square_subsequent_mask(seq_len: int) -> torch.Tensor:
         mask = (torch.triu(torch.ones(seq_len, seq_len)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
-
 
 class TemporalEncoderLayer(nn.Module):
 

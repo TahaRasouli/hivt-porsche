@@ -1,66 +1,93 @@
 import os
-from itertools import permutations, product
-from typing import Callable, Dict, List, Optional, Tuple, Union
-import glob
-import numpy as np
+from typing import Callable, Dict, List, Optional
 import torch
 from torch_geometric.data import Data, Dataset
-from tqdm import tqdm
-from nuscenes.nuscenes import NuScenes
-from nuscenes.map_expansion.map_api import NuScenesMap
-from utils import TemporalData  # make sure your TemporalData signature matches
+from utils import TemporalData
 
 
 class NuScenesDataset(Dataset):
     def __init__(self, root: str, split: str = "train", transform=None):
         """
-        root: path to ./datasets/train or ./datasets/val
-        split: "train" or "val"
+        Dataset for loading preprocessed NuScenes data.
+        
+        Args:
+            root: path to ./datasets (base directory)
+            split: "train" or "val" 
+            transform: optional data transform
         """
         self.root = root
         self.split = split
         self.transform = transform
 
-        # Correct processed folder
-        self._processed_dir = os.path.join(root, "processed")
+        # FIXED: Correct directory structure
+        self._processed_dir = os.path.join(root, split, "processed")
+        
         if not os.path.exists(self._processed_dir):
             raise FileNotFoundError(
                 f"No processed directory found at {self._processed_dir}. "
-                "Make sure your .pt files are here."
+                f"Expected structure: {root}/{split}/processed/"
+                f"Make sure you've run preprocessing and have the correct directory structure."
             )
 
+        # Get all .pt files
         self.pt_files = sorted([
             os.path.join(self._processed_dir, f)
             for f in os.listdir(self._processed_dir)
             if f.endswith(".pt")
         ])
+        
         if len(self.pt_files) == 0:
             raise FileNotFoundError(f"No .pt files found in {self._processed_dir}")
 
-        print(f"[NuScenesDataset] Loading {len(self.pt_files)} preprocessed samples from {self._processed_dir}")
+        print(f"[NuScenesDataset] Found {len(self.pt_files)} preprocessed samples in {self._processed_dir}")
 
-
-        # Safe load with TemporalData allowlist
-        self.data_list: List = []
+        # Load and validate data
+        self.data_list: List[TemporalData] = []
+        valid_count = 0
+        
         for f in self.pt_files:
-            with torch.serialization.safe_globals([TemporalData, Data]):
-                loaded_data = torch.load(f, weights_only=False)
-                # Convert dict to TemporalData if needed
+            try:
+                # Load with safe globals
+                with torch.serialization.safe_globals([TemporalData, Data]):
+                    loaded_data = torch.load(f, weights_only=False, map_location='cpu')
+                
+                # Skip invalid data
+                if loaded_data is None or isinstance(loaded_data, str):
+                    print(f"Warning: Skipping invalid file {f} (contains: {type(loaded_data)})")
+                    continue
+                
+                # Convert dict to TemporalData if needed (for backward compatibility)
                 if isinstance(loaded_data, dict):
                     loaded_data = self._dict_to_temporal_data(loaded_data)
+                elif not isinstance(loaded_data, (TemporalData, Data)):
+                    print(f"Warning: Unexpected data type {type(loaded_data)} in {f}")
+                    continue
+                
+                # Validate data has required attributes
+                if not hasattr(loaded_data, 'num_nodes') or loaded_data.num_nodes == 0:
+                    print(f"Warning: Skipping file {f} - no valid nodes")
+                    continue
+                
                 self.data_list.append(loaded_data)
+                valid_count += 1
+                
+            except Exception as e:
+                print(f"Error loading {f}: {e}")
+                continue
 
+        if len(self.data_list) == 0:
+            raise ValueError(
+                f"No valid data found in {self._processed_dir}! "
+                f"Your preprocessed files may be corrupted or incompatible. "
+                f"Please run preprocessing again with the corrected script."
+            )
+
+        print(f"[NuScenesDataset] Successfully loaded {valid_count} valid samples")
         super().__init__(root, transform)
 
-        print(f"First file content type: {type(self.data_list[0])}")
-        if isinstance(self.data_list[0], str):
-            print(f"First few characters: {self.data_list[0][:100]}")
-        else:
-            print(f"First item keys (if dict): {self.data_list[0].keys() if isinstance(self.data_list[0], dict) else 'Not a dict'}")
-
     def _dict_to_temporal_data(self, data_dict: Dict) -> TemporalData:
-        """Convert dictionary to TemporalData object."""
-        # Create TemporalData with explicit parameters
+        """Convert dictionary to TemporalData object (backward compatibility)."""
+        # Create TemporalData with required parameters
         temporal_data = TemporalData(
             x=data_dict.get('x'),
             positions=data_dict.get('positions'),
@@ -91,13 +118,6 @@ class NuScenesDataset(Dataset):
 
     def get(self, idx) -> TemporalData:
         data = self.data_list[idx]
-        
-        # Convert dict to TemporalData if needed
-        if isinstance(data, dict):
-            temporal_data = TemporalData()
-            for key, value in data.items():
-                setattr(temporal_data, key, value)
-            data = temporal_data
         
         if self.transform is not None:
             data = self.transform(data)

@@ -30,51 +30,58 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
         token = s["next"]
     return samples
 
-
 def process_nuscenes(nusc: NuScenes, scene: Dict, radius: float) -> Optional[Dict]:
-    """Process a single NuScenes scene into HiVT format with adaptive sequence length."""
+    """Process a single NuScenes scene into HiVT format with fixed coordinate system."""
     try:
         samples = _get_sample_chain(nusc, scene["first_sample_token"])
         
-        # Adaptive sequence length based on available frames
-        max_available = len(samples)
-        if max_available < 15:  # Skip very short scenes
-            print(f"Skipping scene {scene['name']}: too short ({max_available} frames)")
+        # Fixed sequence length to avoid dimension mismatch
+        history_steps = 10  # Fixed history
+        future_steps = 20   # Fixed future  
+        total_steps = history_steps + 1 + future_steps  # 31 total (10 + 1 + 20)
+        
+        if len(samples) < total_steps:  # Skip scenes that are too short
+            print(f"Skipping scene {scene['name']}: too short ({len(samples)} < {total_steps})")
             return None
         
-        # Adaptive time windows
-        history_steps = min(10, max_available - 5)  # Use up to 10 history steps
-        future_steps = min(20, max_available - history_steps - 1)  # Use up to 20 future steps
-        total_steps = history_steps + future_steps + 1  # +1 for current frame
-        
-        # Use the last possible reference frame that allows full future prediction
-        ref_idx = min(history_steps, max_available - future_steps - 1)
+        # Use middle frame as reference to ensure we have enough history and future
+        ref_idx = history_steps
         ref_sample = samples[ref_idx]
         ref_time = ref_sample["timestamp"]
 
-        # Build adaptive target times
-        dt_s = 0.1
-        hist_offsets = np.arange(-history_steps, 0) * dt_s
-        future_offsets = np.arange(1, future_steps + 1) * dt_s
-        current_offset = np.array([0.0])
+        # Build target times around reference
+        dt_s = 0.5  # NuScenes samples at 2Hz, so 0.5s between samples
+        offsets = np.arange(-history_steps, future_steps + 1) * dt_s
+        target_times = ref_time + (offsets * 1e6).astype(np.int64)
+
+        # Get ego pose for reference frame FIRST (before processing positions)
+        lidar_key = "LIDAR_TOP"
+        sd_token = ref_sample["data"].get(lidar_key, None) or next(iter(ref_sample["data"].values()))
+        sample_data = nusc.get("sample_data", sd_token)
+        ego_pose = nusc.get("ego_pose", sample_data["ego_pose_token"])
+        ego_origin = np.array(ego_pose["translation"][:2])  # Reference ego position
         
-        all_offsets = np.concatenate([hist_offsets, current_offset, future_offsets])
-        target_times = ref_time + (all_offsets * 1e6).astype(np.int64)
+        # Get ego rotation
+        w, x, y, z = ego_pose["rotation"]
+        ego_yaw = 2.0 * np.arctan2(z, w)  # Convert quaternion to yaw
+        cos_yaw, sin_yaw = np.cos(ego_yaw), np.sin(ego_yaw)
+        ego_rotation = np.array([[cos_yaw, -sin_yaw], [sin_yaw, cos_yaw]])
 
         instance_positions = {}
         instance_types = {}
 
+        # Collect all positions in GLOBAL coordinates first
         for s in samples:
             timestamp = s["timestamp"]
             for ann_token in s["anns"]:
                 ann = nusc.get("sample_annotation", ann_token)
                 inst = ann["instance_token"]
-                x, y, _ = ann["translation"]
+                global_pos = np.array(ann["translation"][:2])  # Global NuScenes coordinates
                 obj_type = ann.get("category_name", ann.get("category", None))
                 if inst not in instance_positions:
                     instance_positions[inst] = []
                     instance_types[inst] = obj_type
-                instance_positions[inst].append((timestamp, x, y))
+                instance_positions[inst].append((timestamp, global_pos[0], global_pos[1]))
 
         instance_tokens = sorted(list(instance_positions.keys()))
         num_nodes = len(instance_tokens)
@@ -82,101 +89,90 @@ def process_nuscenes(nusc: NuScenes, scene: Dict, radius: float) -> Optional[Dic
             print(f"Warning: No annotated instances in scene {scene['name']}")
             return None
 
-        # Use adaptive total_steps instead of fixed 50
         positions = torch.zeros(num_nodes, total_steps, 2, dtype=torch.float)
         padding_mask = torch.ones(num_nodes, total_steps, dtype=torch.bool)
         rotate_angles = torch.zeros(num_nodes, dtype=torch.float)
 
-        # Fill with interpolation where possible, rest stays zero (padding)
+        # Process each instance
         for i, inst in enumerate(instance_tokens):
             times_xy = sorted(instance_positions[inst], key=lambda x: x[0])
             times = np.array([t for t, _, _ in times_xy], dtype=np.int64)
-            xs = np.array([x for _, x, _ in times_xy], dtype=np.float64)
-            ys = np.array([y for _, _, y in times_xy], dtype=np.float64)
+            global_xs = np.array([x for _, x, _ in times_xy], dtype=np.float64)
+            global_ys = np.array([y for _, _, y in times_xy], dtype=np.float64)
 
-            if len(times) == 0:
+            if len(times) < 2:
                 continue
 
+            # Convert times to seconds for interpolation
             times_s = times.astype(np.float64) / 1e6
-            xs_s = xs
-            ys_s = ys
-            tt_s = target_times.astype(np.float64) / 1e6
+            target_times_s = target_times.astype(np.float64) / 1e6
 
-            inside_mask = (tt_s >= times_s[0]) & (tt_s <= times_s[-1])
-            if inside_mask.any() and len(times_s) >= 2:
-                interp_x = np.interp(tt_s[inside_mask], times_s, xs_s)
-                interp_y = np.interp(tt_s[inside_mask], times_s, ys_s)
-                positions[i, inside_mask, 0] = torch.from_numpy(interp_x).float()
-                positions[i, inside_mask, 1] = torch.from_numpy(interp_y).float()
-                padding_mask[i, inside_mask] = False
-
-                # Calculate rotation angles from history
-                hist_indices = np.where(inside_mask & (np.arange(total_steps) < history_steps))[0]
-                if len(hist_indices) >= 2:
-                    a = positions[i, hist_indices[-2]]
-                    b = positions[i, hist_indices[-1]]
-                    heading_vec = b - a
-                    rotate_angles[i] = torch.atan2(heading_vec[1], heading_vec[0])
-
-        # Ego-centric transform
-        lidar_key = "LIDAR_TOP"
-        sd_token = ref_sample["data"].get(lidar_key, None) or next(iter(ref_sample["data"].values()))
-        sample_data = nusc.get("sample_data", sd_token)
-        ego_pose = nusc.get("ego_pose", sample_data["ego_pose_token"])
-        origin = torch.tensor(ego_pose["translation"][:2], dtype=torch.float)
-
-        w, xq, yq, z = ego_pose["rotation"]
-        siny_cosp = 2.0 * (w * z + xq * yq)
-        cosy_cosp = 1.0 - 2.0 * (yq * yq + z * z)
-        theta = float(np.arctan2(siny_cosp, cosy_cosp))
-        c = np.cos(theta)
-        s = np.sin(theta)
-        rotate_mat = torch.tensor([[c, -s], [s, c]], dtype=torch.float)
-
-        positions_rel = positions.clone()
-        for i in range(num_nodes):
+            # Interpolate in global coordinates
+            valid_mask = (target_times_s >= times_s[0]) & (target_times_s <= times_s[-1])
+            
+            if valid_mask.sum() < 2:  # Need at least 2 valid points
+                continue
+                
+            # Interpolate global positions
+            interp_global_x = np.interp(target_times_s, times_s, global_xs)
+            interp_global_y = np.interp(target_times_s, times_s, global_ys)
+            
+            # Convert to ego-centric coordinates (relative to reference frame ego pose)
             for t in range(total_steps):
-                if not padding_mask[i, t]:
-                    positions_rel[i, t] = torch.matmul(positions_rel[i, t] - origin, rotate_mat)
+                if valid_mask[t]:
+                    global_pos = np.array([interp_global_x[t], interp_global_y[t]])
+                    # Transform: (global - ego_origin) rotated by ego_rotation
+                    ego_relative = global_pos - ego_origin
+                    ego_pos = ego_rotation.T @ ego_relative  # Transpose for inverse rotation
+                    
+                    positions[i, t, 0] = ego_pos[0]
+                    positions[i, t, 1] = ego_pos[1]
+                    padding_mask[i, t] = False
 
-        # Build model inputs with adaptive dimensions
-        x = positions_rel.clone()
-        current_frame_idx = history_steps  # Index of current frame
-        mask_current = padding_mask[:, current_frame_idx]
+            # Calculate heading from the last two valid positions
+            valid_indices = torch.where(~padding_mask[i])[0]
+            if len(valid_indices) >= 2:
+                last_two = valid_indices[-2:]
+                heading_vec = positions[i, last_two[1]] - positions[i, last_two[0]]
+                rotate_angles[i] = torch.atan2(heading_vec[1], heading_vec[0])
 
-        # History deltas (relative to previous timestep)
+        # Create model inputs
+        x = positions.clone()
+        
+        # History: relative displacements between consecutive frames
         for i in range(num_nodes):
-            for t in range(1, history_steps + 1):  # Include current frame
-                if not (padding_mask[i, t - 1] or padding_mask[i, t]):
-                    x[i, t] = positions_rel[i, t] - positions_rel[i, t - 1]
+            x[i, 0] = torch.zeros(2)  # First frame is always zero
+            for t in range(1, history_steps + 1):
+                if not (padding_mask[i, t-1] or padding_mask[i, t]):
+                    x[i, t] = positions[i, t] - positions[i, t-1]  # Delta from previous
                 else:
                     x[i, t] = torch.zeros(2)
-            x[i, 0] = torch.zeros(2)  # First timestep is always zero
 
-        # Future deltas (relative to current frame)
+        # Future: relative to current frame (index = history_steps)
+        current_idx = history_steps
         for i in range(num_nodes):
-            if mask_current[i]:
-                x[i, current_frame_idx + 1:] = torch.zeros(future_steps, 2)
+            if padding_mask[i, current_idx]:  # No valid current position
+                x[i, current_idx+1:] = torch.zeros(future_steps, 2)
             else:
-                for t in range(current_frame_idx + 1, total_steps):
+                for t in range(current_idx + 1, total_steps):
                     if not padding_mask[i, t]:
-                        x[i, t] = positions_rel[i, t] - positions_rel[i, current_frame_idx]
+                        x[i, t] = positions[i, t] - positions[i, current_idx]  # Delta from current
                     else:
                         x[i, t] = torch.zeros(2)
 
-        # Adaptive BOS mask
-        bos_mask = torch.zeros(num_nodes, history_steps + 1, dtype=torch.bool)  # +1 for current
-        bos_mask[:, 0] = ~padding_mask[:, 0]
-        bos_mask[:, 1:history_steps + 1] = padding_mask[:, :history_steps] & (~padding_mask[:, 1:history_steps + 1])
-        
-        edge_index = torch.LongTensor(list(permutations(range(num_nodes), 2))).t().contiguous()
-        y = positions_rel[:, current_frame_idx + 1:].clone()  # Future positions
+        # BOS mask for temporal encoder
+        bos_mask = torch.zeros(num_nodes, history_steps + 1, dtype=torch.bool)
+        bos_mask[:, 0] = ~padding_mask[:, 0]  # First frame
+        for t in range(1, history_steps + 1):
+            bos_mask[:, t] = padding_mask[:, t-1] & (~padding_mask[:, t])  # Start of sequence
 
-        # Lane processing (simplified)
+        edge_index = torch.LongTensor(list(permutations(range(num_nodes), 2))).t().contiguous()
+        y = positions[:, current_idx + 1:].clone()  # Future positions (absolute, ego-centric)
+
+        # Lane processing (simplified - empty for now)
         log_rec = nusc.get("log", scene["log_token"])
         map_name = log_rec["location"]
         
-        # Create empty lane data (can be enhanced later)
         lane_vectors = torch.zeros(0, 2)
         is_intersections = torch.zeros(0, dtype=torch.uint8)
         turn_directions = torch.zeros(0, dtype=torch.uint8)
@@ -188,10 +184,10 @@ def process_nuscenes(nusc: NuScenes, scene: Dict, radius: float) -> Optional[Dic
         seq_id = scene["name"]
 
         return {
-            'x': x[:, :history_steps + 1],  # History + current frame
-            'positions': positions_rel,
+            'x': x[:, :history_steps + 1],  # History + current (11 frames)
+            'positions': positions,         # All positions (31 frames)
             'edge_index': edge_index,
-            'y': y,  # Future positions only
+            'y': y,                        # Future positions (20 frames)
             'num_nodes': num_nodes,
             'padding_mask': padding_mask,
             'bos_mask': bos_mask,
@@ -206,17 +202,15 @@ def process_nuscenes(nusc: NuScenes, scene: Dict, radius: float) -> Optional[Dic
             'av_index': av_index,
             'agent_index': agent_index,
             'city': map_name,
-            'origin': origin.unsqueeze(0),
-            'theta': theta,
-            # Store adaptive dimensions for model
-            'historical_steps': history_steps + 1,  # +1 for current
-            'future_steps': future_steps,
+            'origin': torch.tensor([[0.0, 0.0]]),  # Origin is now (0,0) in ego coordinates
+            'theta': 0.0,  # No rotation needed, already in ego frame
         }
 
     except Exception as e:
         print(f"Error processing scene {scene['name']}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
-
 
 def process_split(nusc: NuScenes, scenes: List[Dict], split_name: str, output_dir: str, local_radius: float):
     """Process all scenes for a given split."""

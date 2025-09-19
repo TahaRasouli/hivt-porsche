@@ -39,22 +39,33 @@ class NuScenesDataModule(pl.LightningDataModule):
         train_path = os.path.join(self.root, "train", "processed")
         val_path = os.path.join(self.root, "val", "processed")
         
-        if not os.path.exists(train_path) or not os.listdir(train_path):
-            raise FileNotFoundError(f"No preprocessed train files found at {train_path}")
-        if not os.path.exists(val_path) or not os.listdir(val_path):
-            raise FileNotFoundError(f"No preprocessed val files found at {val_path}")
+        if not os.path.exists(train_path):
+            raise FileNotFoundError(f"No train processed directory found at {train_path}")
+        if not os.path.exists(val_path):
+            raise FileNotFoundError(f"No val processed directory found at {val_path}")
+            
+        train_files = [f for f in os.listdir(train_path) if f.endswith('.pt')]
+        val_files = [f for f in os.listdir(val_path) if f.endswith('.pt')]
+        
+        if len(train_files) == 0:
+            raise FileNotFoundError(f"No .pt files found in {train_path}")
+        if len(val_files) == 0:
+            raise FileNotFoundError(f"No .pt files found in {val_path}")
+            
+        print(f"Found {len(train_files)} training files and {len(val_files)} validation files")
 
     def setup(self, stage: Optional[str] = None):
         """Set up datasets for training and validation."""
         if stage in (None, "fit"):
+            # FIXED: Pass root as base directory, let dataset handle the split
             self.train_dataset = NuScenesDataset(
-                root=os.path.join(self.root, "train"), 
-                split="train",
+                root=self.root,        # Just "./datasets"
+                split="train",         # Dataset will create "./datasets/train/processed"
                 transform=self.train_transform
             )
             self.val_dataset = NuScenesDataset(
-                root=os.path.join(self.root, "val"), 
-                split="val",
+                root=self.root,        # Just "./datasets" 
+                split="val",           # Dataset will create "./datasets/val/processed"
                 transform=self.val_transform
             )
 
