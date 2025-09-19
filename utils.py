@@ -73,7 +73,7 @@ class TemporalData(Data):
         else:
             return super().__cat_dim__(key, value, *args, **kwargs)
 
-    def __inc__(self, key, value):
+    def __inc__(self, key, value, *args):
         if key == 'lane_actor_index':
             return torch.tensor([[self['lane_vectors'].size(0)], [self.num_nodes]])
         elif key == 'edge_index':
