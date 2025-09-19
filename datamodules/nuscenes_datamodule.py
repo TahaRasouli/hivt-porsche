@@ -2,21 +2,9 @@ import os
 from typing import Optional, Callable
 
 import pytorch_lightning as pl
-from torch_geometric.data import DataLoader, Batch
+from torch_geometric.loader import DataLoader
 
 from datasets.nuscenes_dataset import NuScenesDataset
-
-
-def pyg_collate_fn(batch):
-    """
-    Custom collate function for PyG datasets.
-    Converts a list of Data objects into a Batch object.
-    """
-    if isinstance(batch, Batch):
-        return batch
-    if isinstance(batch, list) and all(hasattr(x, "num_nodes") for x in batch):
-        return Batch.from_data_list(batch)
-    raise TypeError(f"Unexpected batch type: {type(batch)}")
 
 
 class NuScenesDataModule(pl.LightningDataModule):
@@ -47,40 +35,49 @@ class NuScenesDataModule(pl.LightningDataModule):
         self.val_dataset = None
 
     def prepare_data(self):
+        """Check that processed data exists."""
         train_path = os.path.join(self.root, "train", "processed")
         val_path = os.path.join(self.root, "val", "processed")
+        
         if not os.path.exists(train_path) or not os.listdir(train_path):
             raise FileNotFoundError(f"No preprocessed train files found at {train_path}")
         if not os.path.exists(val_path) or not os.listdir(val_path):
             raise FileNotFoundError(f"No preprocessed val files found at {val_path}")
 
     def setup(self, stage: Optional[str] = None):
+        """Set up datasets for training and validation."""
         if stage in (None, "fit"):
             self.train_dataset = NuScenesDataset(
-                os.path.join(self.root, "train"), transform=self.train_transform
+                root=os.path.join(self.root, "train"), 
+                split="train",
+                transform=self.train_transform
             )
             self.val_dataset = NuScenesDataset(
-                os.path.join(self.root, "val"), transform=self.val_transform
+                root=os.path.join(self.root, "val"), 
+                split="val",
+                transform=self.val_transform
             )
 
     def train_dataloader(self):
+        """Create training dataloader."""
         return DataLoader(
             self.train_dataset,
             batch_size=self.train_batch_size,
             shuffle=self.shuffle,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
-            collate_fn=pyg_collate_fn,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
+            drop_last=True,  # Ensures consistent batch sizes
         )
 
     def val_dataloader(self):
+        """Create validation dataloader.""" 
         return DataLoader(
             self.val_dataset,
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
-            collate_fn=pyg_collate_fn,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
+            drop_last=False,  # Keep all validation samples
         )

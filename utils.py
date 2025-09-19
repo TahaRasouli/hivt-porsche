@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any, Union
 
 import torch
 import torch.nn as nn
@@ -51,9 +51,36 @@ class TemporalData(Data):
             for t in range(self.x.size(1)):
                 self[f'edge_attr_{t}'] = edge_attrs[t]
 
+    def __cat_dim__(self, key: str, value: Any, *args, **kwargs) -> Optional[int]:
+        """
+        Specify how to concatenate different attributes when batching.
+        This is the key method that was missing!
+        """
+        # Node-level features (concatenate along node dimension)
+        if key in ['x', 'y', 'positions', 'padding_mask', 'bos_mask', 'rotate_angles']:
+            return 0
+        # Edge-level features (concatenate along edge dimension)
+        elif key in ['edge_index'] or key.startswith('edge_attr_'):
+            return -1
+        # Lane/map features (concatenate along feature dimension)
+        elif key in ['lane_vectors', 'is_intersections', 'turn_directions', 'traffic_controls', 'lane_actor_vectors']:
+            return 0
+        elif key == 'lane_actor_index':
+            return -1
+        # Scalar attributes that shouldn't be concatenated (return None)
+        elif key in ['seq_id', 'city', 'av_index', 'agent_index', 'theta', 'origin', 'num_nodes']:
+            return None
+        else:
+            return super().__cat_dim__(key, value, *args, **kwargs)
+
     def __inc__(self, key, value):
         if key == 'lane_actor_index':
             return torch.tensor([[self['lane_vectors'].size(0)], [self.num_nodes]])
+        elif key == 'edge_index':
+            return self.num_nodes
+        # Handle edge attributes that need node index incrementation
+        elif key.startswith('edge_attr_'):
+            return 0  # Edge attributes don't need index incrementation
         else:
             return super().__inc__(key, value)
 

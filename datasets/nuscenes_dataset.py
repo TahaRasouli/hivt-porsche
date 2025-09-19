@@ -43,15 +43,56 @@ class NuScenesDataset(Dataset):
         self.data_list: List = []
         for f in self.pt_files:
             with torch.serialization.safe_globals([TemporalData, Data]):
-                self.data_list.append(torch.load(f, weights_only=False))
+                loaded_data = torch.load(f, weights_only=False)
+                # Convert dict to TemporalData if needed
+                if isinstance(loaded_data, dict):
+                    loaded_data = self._dict_to_temporal_data(loaded_data)
+                self.data_list.append(loaded_data)
 
         super().__init__(root, transform)
+
+    def _dict_to_temporal_data(self, data_dict: Dict) -> TemporalData:
+        """Convert dictionary to TemporalData object."""
+        # Create TemporalData with explicit parameters
+        temporal_data = TemporalData(
+            x=data_dict.get('x'),
+            positions=data_dict.get('positions'),
+            edge_index=data_dict.get('edge_index'),
+            y=data_dict.get('y'),
+            num_nodes=data_dict.get('num_nodes'),
+            padding_mask=data_dict.get('padding_mask'),
+            bos_mask=data_dict.get('bos_mask'),
+            rotate_angles=data_dict.get('rotate_angles'),
+            lane_vectors=data_dict.get('lane_vectors'),
+            is_intersections=data_dict.get('is_intersections'),
+            turn_directions=data_dict.get('turn_directions'),
+            traffic_controls=data_dict.get('traffic_controls'),
+            lane_actor_index=data_dict.get('lane_actor_index'),
+            lane_actor_vectors=data_dict.get('lane_actor_vectors'),
+            seq_id=data_dict.get('seq_id')
+        )
+        
+        # Add any additional attributes that aren't in the constructor
+        for key, value in data_dict.items():
+            if not hasattr(temporal_data, key):
+                setattr(temporal_data, key, value)
+        
+        return temporal_data
 
     def len(self) -> int:
         return len(self.data_list)
 
     def get(self, idx) -> TemporalData:
-        return self.data_list[idx]
+        data = self.data_list[idx]
+        
+        # Ensure we return a TemporalData object
+        if isinstance(data, dict):
+            data = self._dict_to_temporal_data(data)
+        
+        if self.transform is not None:
+            data = self.transform(data)
+            
+        return data
 
     @property
     def processed_dir(self):
@@ -69,7 +110,7 @@ def _get_sample_chain(nusc: NuScenes, first_sample_token: str) -> List[Dict]:
 
 def process_nuscenes(nusc: NuScenes,
                      scene: Dict,
-                     radius: float) -> Optional[Dict]:
+                     radius: float) -> Optional[TemporalData]:  # Return TemporalData instead of Dict
     try:
         samples = _get_sample_chain(nusc, scene["first_sample_token"])
         num_frames = len(samples)
@@ -207,28 +248,31 @@ def process_nuscenes(nusc: NuScenes,
         av_index, agent_index = 0, 0
         seq_id = scene["name"]
 
-        return {
-            'x': x[:, :20],
-            'positions': positions_rel,
-            'edge_index': edge_index,
-            'y': y,
-            'num_nodes': num_nodes,
-            'padding_mask': padding_mask,
-            'bos_mask': bos_mask,
-            'rotate_angles': rotate_angles,
-            'lane_vectors': lane_vectors,
-            'is_intersections': is_intersections,
-            'turn_directions': turn_directions,
-            'traffic_controls': traffic_controls,
-            'lane_actor_index': lane_actor_index,
-            'lane_actor_vectors': lane_actor_vectors,
-            'seq_id': seq_id,
-            'av_index': av_index,
-            'agent_index': agent_index,
-            'city': map_name,
-            'origin': origin.unsqueeze(0),
-            'theta': theta,
-        }
+        # Return TemporalData object instead of dictionary
+        return TemporalData(
+            x=x[:, :20],
+            positions=positions_rel,
+            edge_index=edge_index,
+            y=y,
+            num_nodes=num_nodes,
+            padding_mask=padding_mask,
+            bos_mask=bos_mask,
+            rotate_angles=rotate_angles,
+            lane_vectors=lane_vectors,
+            is_intersections=is_intersections,
+            turn_directions=turn_directions,
+            traffic_controls=traffic_controls,
+            lane_actor_index=lane_actor_index,
+            lane_actor_vectors=lane_actor_vectors,
+            seq_id=seq_id,
+            # Additional attributes
+            av_index=av_index,
+            agent_index=agent_index,
+            city=map_name,
+            origin=origin.unsqueeze(0),
+            theta=theta,
+        )
+        
     except Exception as e:
         print(f"[process_nuscenes] Failed for scene {scene['name']}: {e}")
         return None
