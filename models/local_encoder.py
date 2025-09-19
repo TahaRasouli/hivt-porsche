@@ -20,7 +20,13 @@ class LocalEncoder(nn.Module):
         self.parallel = parallel
         self.drop_edge = DistanceDropEdge(local_radius)
         self.aa_encoder = AAEncoder(historical_steps, node_dim, edge_dim, embed_dim, num_heads, dropout, parallel)
-        self.temporal_encoder = TemporalEncoder(historical_steps, embed_dim, num_heads, num_temporal_layers, dropout)
+        self.temporal_encoder = TemporalEncoder(
+            max_historical_steps=historical_steps, 
+            embed_dim=embed_dim, 
+            num_heads=num_heads, 
+            num_temporal_layers=num_temporal_layers, 
+            dropout=dropout
+        )
         self.al_encoder = ALEncoder(node_dim, edge_dim, embed_dim, num_heads, dropout)
 
     def forward(self, data: TemporalData) -> torch.Tensor:
