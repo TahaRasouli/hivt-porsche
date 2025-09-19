@@ -85,9 +85,12 @@ class NuScenesDataset(Dataset):
     def get(self, idx) -> TemporalData:
         data = self.data_list[idx]
         
-        # Ensure we return a TemporalData object
+        # Convert dict to TemporalData if needed
         if isinstance(data, dict):
-            data = self._dict_to_temporal_data(data)
+            temporal_data = TemporalData()
+            for key, value in data.items():
+                setattr(temporal_data, key, value)
+            data = temporal_data
         
         if self.transform is not None:
             data = self.transform(data)

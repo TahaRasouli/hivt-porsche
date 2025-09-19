@@ -37,6 +37,15 @@ if __name__ == '__main__':
         num_workers=args.num_workers
     )
 
+    # Diagnostics!
+    print("Testing dataset output:")
+    datamodule.setup('fit')
+    sample = datamodule.train_dataset[0]
+    print(f"Sample type: {type(sample)}")
+    print(f"Has num_nodes: {hasattr(sample, 'num_nodes')}")
+    if hasattr(sample, 'num_nodes'):
+        print(f"num_nodes value: {sample.num_nodes}")
+
     # Checkpoint callback
     model_checkpoint = ModelCheckpoint(
         monitor=args.monitor,
