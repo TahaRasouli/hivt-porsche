@@ -21,7 +21,7 @@ class LocalEncoder(nn.Module):
         self.drop_edge = DistanceDropEdge(local_radius)
         self.aa_encoder = AAEncoder(historical_steps, node_dim, edge_dim, embed_dim, num_heads, dropout, parallel)
         self.temporal_encoder = TemporalEncoder(
-            max_historical_steps=historical_steps, 
+            historical_steps=historical_steps, 
             embed_dim=embed_dim, 
             num_heads=num_heads, 
             num_temporal_layers=num_temporal_layers, 
