@@ -1,1 +1,1 @@
-from datasets import nuscenes_dataset
+from datamodules.argoverse_v1_datamodule import ArgoverseV1DataModule
