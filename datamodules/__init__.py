@@ -1,1 +1,1 @@
-from datasets.argoverse_v1_dataset import ArgoverseV1Dataset
+from .argoverse_v1_datamodule import ArgoverseV1DataModule
