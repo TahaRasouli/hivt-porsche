@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.data import DataLoader
 import pytorch_lightning as pl
-from datasets import ArgoverseV1Dataset
+from datasets import NuScenesDataModule
 from models.hivt import HiVT
 import os
 import json
@@ -61,7 +61,7 @@ if __name__ == '__main__':
     # -------------------------
     # Validation dataloader
     # -------------------------
-    val_dataset = ArgoverseV1Dataset(root=root, split='val', local_radius=model.hparams.local_radius)
+    val_dataset = NuScenesDataModule(root=root, split='val', local_radius=model.hparams.local_radius)
     dataloader = DataLoader(
         val_dataset,
         batch_size=batch_size,

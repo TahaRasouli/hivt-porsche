@@ -16,7 +16,7 @@ from argparse import ArgumentParser
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from datamodules import ArgoverseV1DataModule
+from datamodules import NuScenesDataModule
 from models.hivt import HiVT
 
 if __name__ == '__main__':
@@ -40,5 +40,5 @@ if __name__ == '__main__':
     model_checkpoint = ModelCheckpoint(monitor=args.monitor, save_top_k=args.save_top_k, mode='min')
     trainer = pl.Trainer.from_argparse_args(args, callbacks=[model_checkpoint])
     model = HiVT(**vars(args))
-    datamodule = ArgoverseV1DataModule.from_argparse_args(args)
+    datamodule = NuScenesDataModule.from_argparse_args(args)
     trainer.fit(model, datamodule)
