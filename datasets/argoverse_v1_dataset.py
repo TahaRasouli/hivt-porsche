@@ -88,7 +88,8 @@ class ArgoverseV1Dataset(Dataset):
         return len(self._raw_file_names)
 
     def get(self, idx) -> Data:
-        return torch.load(self.processed_paths[idx])
+        with torch.serialization.safe_globals([TemporalData]):
+            return torch.load(self.processed_paths[idx])
 
 
 def process_argoverse(split: str,
