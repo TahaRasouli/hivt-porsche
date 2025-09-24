@@ -273,7 +273,8 @@ class TemporalEncoderLayer(nn.Module):
     def forward(self,
                 src: torch.Tensor,
                 src_mask: Optional[torch.Tensor] = None,
-                src_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                src_key_padding_mask: Optional[torch.Tensor] = None,
+                **kwargs) -> torch.Tensor:   # <-- allow extra args like is_causal
         x = src
         x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
         x = x + self._ff_block(self.norm2(x))
@@ -289,6 +290,7 @@ class TemporalEncoderLayer(nn.Module):
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
         x = self.linear2(self.dropout(F.relu_(self.linear1(x))))
         return self.dropout2(x)
+
 
 
 class ALEncoder(MessagePassing):
