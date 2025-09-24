@@ -1,7 +1,7 @@
 import argparse
 import torch
 from torch.utils.data import DataLoader
-from dataset import HiVTDataset  # replace with your dataset class
+from datasets import ArgoverseV1Dataset
 from models import HiVT  # your main model that uses LocalEncoder + GlobalInteractor
 
 # --- Safe checkpoint loader for PyTorch 2.6+ ---
