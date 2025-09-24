@@ -1,49 +1,65 @@
-from argparse import ArgumentParser
-
-import pytorch_lightning as pl
+import torch
 from torch_geometric.data import DataLoader
-
-from datasets.argoverse_v1_dataset import ArgoverseV1Dataset
+import pytorch_lightning as pl
+from datasets import ArgoverseV1Dataset
 from models.hivt import HiVT
 
 if __name__ == '__main__':
     pl.seed_everything(2022)
 
-    parser = ArgumentParser()
-    parser.add_argument('--root', type=str, required=True)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--pin_memory', type=bool, default=True)
-    parser.add_argument('--persistent_workers', type=bool, default=True)
-    parser.add_argument('--gpus', type=int, default=1)
-    parser.add_argument('--ckpt_path', type=str, required=True)
-    args = parser.parse_args()
+    # --- CONFIG ---
+    root = './datasets'
+    batch_size = 4
+    num_workers = 8
+    pin_memory = True
+    persistent_workers = True
+    ckpt_path = './checkpoints/epoch=63-step=411903.ckpt'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    # Lightning 2.x: manually configure trainer
-    trainer = pl.Trainer(
-        accelerator='gpu' if args.gpus > 0 else 'cpu',
-        devices=args.gpus if args.gpus > 0 else None,
-        num_sanity_val_steps=0
+    # --- LOAD CHECKPOINT HYPERPARAMETERS ---
+    ckpt = torch.load(ckpt_path, map_location='cpu')
+    hparams = ckpt['hyper_parameters'] if 'hyper_parameters' in ckpt else ckpt['hyper_params']
+
+    # --- INIT MODEL ---
+    model = HiVT(
+        historical_steps=hparams['historical_steps'],
+        future_steps=hparams['future_steps'],
+        num_modes=hparams['num_modes'],
+        rotate=hparams['rotate'],
+        node_dim=hparams['node_dim'],
+        edge_dim=hparams['edge_dim'],
+        embed_dim=hparams['embed_dim'],
+        num_heads=hparams['num_heads'],
+        dropout=hparams['dropout'],
+        num_temporal_layers=hparams['num_temporal_layers'],
+        num_global_layers=hparams['num_global_layers'],
+        local_radius=hparams['local_radius'],
+        parallel=False,
+        lr=hparams.get('lr', 5e-4),
+        weight_decay=hparams.get('weight_decay', 1e-4),
+        T_max=hparams.get('T_max', 64)
     )
 
-    # Load model from checkpoint
-    model = HiVT.load_from_checkpoint(checkpoint_path=args.ckpt_path, parallel=True)
+    # --- LOAD CHECKPOINT ---
+    model.load_state_dict(ckpt['state_dict'])
+    model.to(device)
+    model.eval()
 
-    # Load preprocessed validation dataset (skip any raw data processing)
-    val_dataset = ArgoverseV1Dataset(
-        root=args.root,
-        split='val',
-        local_radius=model.hparams.local_radius
-    )
-
-    dataloader = DataLoader(
+    # --- DATASET & DATALOADER ---
+    val_dataset = ArgoverseV1Dataset(root=root, split='val', local_radius=model.hparams.local_radius)
+    val_loader = DataLoader(
         val_dataset,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_memory,
-        persistent_workers=args.persistent_workers
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers
     )
 
-    # Run evaluation
-    trainer.validate(model, dataloader)
+    # --- VALIDATION ---
+    trainer = pl.Trainer(
+        accelerator='gpu' if device == 'cuda' else 'cpu',
+        devices=1 if device == 'cuda' else None,
+        logger=False
+    )
+    trainer.validate(model, val_loader)
