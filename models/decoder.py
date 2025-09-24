@@ -77,8 +77,7 @@ class GRUDecoder(nn.Module):
         out = out.transpose(0, 1)  # [F x N, H, D]
         loc = self.loc(out)  # [F x N, H, 2]
         if self.uncertain:
-            # Fixed: Use non-inplace elu
-            scale = F.elu(self.scale(out), alpha=1.0) + 1.0 + self.min_scale  # [F x N, H, 2]
+            scale = F.elu_(self.scale(out), alpha=1.0) + 1.0 + self.min_scale  # [F x N, H, 2]
             return torch.cat((loc, scale),
                              dim=-1).view(self.num_modes, -1, self.future_steps, 4), pi  # [F, N, H, 4], [N, F]
         else:
@@ -135,8 +134,8 @@ class MLPDecoder(nn.Module):
         out = self.aggr_embed(torch.cat((global_embed, local_embed.expand(self.num_modes, *local_embed.shape)), dim=-1))
         loc = self.loc(out).view(self.num_modes, -1, self.future_steps, 2)  # [F, N, H, 2]
         if self.uncertain:
-            # Fixed: Use non-inplace elu and proper ordering of operations
-            scale = F.elu(self.scale(out), alpha=1.0).view(self.num_modes, -1, self.future_steps, 2) + 1.0 + self.min_scale  # [F, N, H, 2]
+            scale = F.elu_(self.scale(out), alpha=1.0).view(self.num_modes, -1, self.future_steps, 2) + 1.0
+            scale = scale + self.min_scale  # [F, N, H, 2]
             return torch.cat((loc, scale), dim=-1), pi  # [F, N, H, 4], [N, F]
         else:
             return loc, pi  # [F, N, H, 2], [N, F]

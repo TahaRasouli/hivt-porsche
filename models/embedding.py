@@ -1,3 +1,16 @@
+# Copyright (c) 2022, Zikang Zhou. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 from typing import List, Optional
 
 import torch
@@ -7,27 +20,20 @@ from utils import init_weights
 
 
 class SingleInputEmbedding(nn.Module):
-    """
-    Embeds a single continuous input into a higher dimensional feature space.
-    """
 
     def __init__(self,
                  in_channel: int,
-                 out_channel: int,
-                 dropout: float = 0.1) -> None:
+                 out_channel: int) -> None:
         super(SingleInputEmbedding, self).__init__()
         self.embed = nn.Sequential(
             nn.Linear(in_channel, out_channel),
             nn.LayerNorm(out_channel),
             nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
             nn.Linear(out_channel, out_channel),
             nn.LayerNorm(out_channel),
             nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
             nn.Linear(out_channel, out_channel),
-            nn.LayerNorm(out_channel)
-        )
+            nn.LayerNorm(out_channel))
         self.apply(init_weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -35,72 +41,30 @@ class SingleInputEmbedding(nn.Module):
 
 
 class MultipleInputEmbedding(nn.Module):
-    """
-    Embeds multiple continuous (and optionally categorical) inputs
-    into a shared feature space and aggregates them.
-    """
 
     def __init__(self,
                  in_channels: List[int],
-                 out_channel: int,
-                 dropout: float = 0.1) -> None:
+                 out_channel: int) -> None:
         super(MultipleInputEmbedding, self).__init__()
-        
-        if not in_channels:
-            raise ValueError("in_channels cannot be empty")
-        
-        self.num_inputs = len(in_channels)
-        self.out_channel = out_channel
-        
-        self.module_list = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(in_channel, out_channel),
-                nn.LayerNorm(out_channel),
-                nn.ReLU(inplace=True),
-                nn.Dropout(dropout),
-                nn.Linear(out_channel, out_channel)
-            )
-            for in_channel in in_channels
-        ])
-        
+        self.module_list = nn.ModuleList(
+            [nn.Sequential(nn.Linear(in_channel, out_channel),
+                           nn.LayerNorm(out_channel),
+                           nn.ReLU(inplace=True),
+                           nn.Linear(out_channel, out_channel))
+             for in_channel in in_channels])
         self.aggr_embed = nn.Sequential(
             nn.LayerNorm(out_channel),
             nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
             nn.Linear(out_channel, out_channel),
-            nn.LayerNorm(out_channel)
-        )
+            nn.LayerNorm(out_channel))
         self.apply(init_weights)
 
     def forward(self,
                 continuous_inputs: List[torch.Tensor],
                 categorical_inputs: Optional[List[torch.Tensor]] = None) -> torch.Tensor:
-        
-        # Input validation
-        if len(continuous_inputs) != self.num_inputs:
-            raise ValueError(f"Expected {self.num_inputs} continuous inputs, got {len(continuous_inputs)}")
-        
-        # Process continuous inputs
-        embedded_outputs = []
-        for i, input_tensor in enumerate(continuous_inputs):
-            if input_tensor.size(-1) == 0:  # Skip empty tensors
-                continue
-            embedded_outputs.append(self.module_list[i](input_tensor))
-        
-        if not embedded_outputs:
-            raise ValueError("No valid continuous inputs to process")
-            
-        # Aggregate continuous embeddings
-        output = torch.stack(embedded_outputs, dim=0).sum(dim=0)
-
-        # Add categorical inputs if provided
+        for i in range(len(self.module_list)):
+            continuous_inputs[i] = self.module_list[i](continuous_inputs[i])
+        output = torch.stack(continuous_inputs).sum(dim=0)
         if categorical_inputs is not None:
-            categorical_outputs = [cat_input for cat_input in categorical_inputs if cat_input.size(-1) > 0]
-            if categorical_outputs:
-                categorical_sum = torch.stack(categorical_outputs, dim=0).sum(dim=0)
-                # Ensure same shape for addition
-                if categorical_sum.shape != output.shape:
-                    raise ValueError(f"Categorical input shape {categorical_sum.shape} doesn't match continuous output shape {output.shape}")
-                output = output + categorical_sum
-
+            output += torch.stack(categorical_inputs).sum(dim=0)
         return self.aggr_embed(output)
