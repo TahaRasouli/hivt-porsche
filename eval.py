@@ -8,9 +8,6 @@ from models.hivt import HiVT
 if __name__ == '__main__':
     pl.seed_everything(2022)
 
-    # -------------------------
-    # Arguments (replace with argparse if needed)
-    # -------------------------
     root = './datasets'
     batch_size = 4
     num_workers = 8
@@ -20,13 +17,17 @@ if __name__ == '__main__':
     ckpt_path = './checkpoints/epoch=63-step=411903.ckpt'
 
     # -------------------------
-    # Load model weights safely (PyTorch 2.6+)
+    # Load full Lightning checkpoint safely
     # -------------------------
-    # Only load weights, skip Lightning checkpoint objects
-    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=True)
+    # Allowlist the ModelCheckpoint class for unpickling
+    from pytorch_lightning.callbacks import ModelCheckpoint
 
-    # Initialize model with the same hyperparameters as training
-    # Adjust embed_dim and local_radius according to your trained model
+    with torch.serialization.safe_globals([ModelCheckpoint]):
+        checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+
+    # -------------------------
+    # Initialize model with matching hyperparameters
+    # -------------------------
     model = HiVT(
         historical_steps=20,
         future_steps=30,
@@ -46,14 +47,15 @@ if __name__ == '__main__':
         T_max=64
     )
 
-    # Load weights
-    model.load_state_dict(checkpoint)
+    # Load state_dict from checkpoint
+    state_dict = checkpoint['state_dict']
+    model.load_state_dict(state_dict)
     model.eval()
     if gpus > 0:
         model = model.cuda()
 
     # -------------------------
-    # Prepare validation dataset & dataloader
+    # Validation dataloader
     # -------------------------
     val_dataset = ArgoverseV1Dataset(root=root, split='val', local_radius=model.hparams.local_radius)
     dataloader = DataLoader(
@@ -66,12 +68,11 @@ if __name__ == '__main__':
     )
 
     # -------------------------
-    # Validation loop
+    # Run evaluation
     # -------------------------
     with torch.no_grad():
         for batch_idx, data in enumerate(dataloader):
             if gpus > 0:
                 data = data.to('cuda')
             y_hat, pi = model(data)
-            # Optionally: compute metrics or print batch info
             print(f'Batch {batch_idx} processed.')
