@@ -1,9 +1,10 @@
 import torch
 from torch_geometric.data import DataLoader
 import pytorch_lightning as pl
-
 from datasets import ArgoverseV1Dataset
 from models.hivt import HiVT
+import os
+import json
 
 if __name__ == '__main__':
     pl.seed_everything(2022)
@@ -73,15 +74,29 @@ if __name__ == '__main__':
     # -------------------------
     # Run evaluation
     # -------------------------
+    results_dir = './results'
+    os.makedirs(results_dir, exist_ok=True)
+
     with torch.no_grad():
         for batch_idx, data in enumerate(dataloader):
             if gpus > 0:
                 data = data.to('cuda')
             y_hat, pi = model(data)
 
-            # Print batch-level info
-            print(f'\nBatch {batch_idx} results:')
+            batch_results = []
             for i in range(y_hat.size(0)):
-                print(f'  Sample {i}:')
-                print(f'    y_hat: {y_hat[i].cpu().numpy()}')
-                print(f'    pi: {pi[i].cpu().numpy()}')
+                sample_result = {
+                    'y_hat': y_hat[i].cpu().tolist(),  # convert to list for JSON
+                    'pi': pi[i].cpu().tolist()
+                }
+                batch_results.append(sample_result)
+
+                # Print each sample's results
+                print(f'Batch {batch_idx}, Sample {i}:')
+                print(f'  y_hat: {sample_result["y_hat"]}')
+                print(f'  pi: {sample_result["pi"]}')
+
+            # Save batch results as JSON
+            batch_file = os.path.join(results_dir, f'batch_{batch_idx}.json')
+            with open(batch_file, 'w') as f:
+                json.dump(batch_results, f, indent=2)
