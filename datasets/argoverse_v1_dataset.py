@@ -20,6 +20,7 @@ import pandas as pd
 import torch
 from torch_geometric.data import Data, Dataset
 from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
+from torch_geometric.data.storage import GlobalStorage
 from tqdm import tqdm
 
 from utils import TemporalData
@@ -89,7 +90,7 @@ class ArgoverseV1Dataset(Dataset):
         return len(self._raw_file_names)
 
     def get(self, idx) -> Data:
-        with torch.serialization.safe_globals([TemporalData, DataEdgeAttr, DataTensorAttr]):
+        with torch.serialization.safe_globals([TemporalData, DataEdgeAttr, DataTensorAttr, GlobalStorage]):
             return torch.load(self.processed_paths[idx])
 
 
