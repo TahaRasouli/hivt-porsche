@@ -78,4 +78,10 @@ if __name__ == '__main__':
             if gpus > 0:
                 data = data.to('cuda')
             y_hat, pi = model(data)
-            print(f'Batch {batch_idx} processed.')
+
+            # Print batch-level info
+            print(f'\nBatch {batch_idx} results:')
+            for i in range(y_hat.size(0)):
+                print(f'  Sample {i}:')
+                print(f'    y_hat: {y_hat[i].cpu().numpy()}')
+                print(f'    pi: {pi[i].cpu().numpy()}')
