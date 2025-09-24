@@ -1,62 +1,81 @@
-import argparse
 import torch
-from torch.utils.data import DataLoader
+from torch_geometric.data import DataLoader
+import pytorch_lightning as pl
+
 from datasets import ArgoverseV1Dataset
-from models import HiVT  # your main model that uses LocalEncoder + GlobalInteractor
-
-# --- Safe checkpoint loader for PyTorch 2.6+ ---
-from torch.serialization import safe_globals
-
-def load_checkpoint(ckpt_path, map_location='cpu'):
-    try:
-        # allowlist the PyTorch Lightning ModelCheckpoint class
-        with safe_globals([torch.nn.Module]):
-            checkpoint = torch.load(ckpt_path, map_location=map_location, weights_only=False)
-        return checkpoint
-    except Exception as e:
-        print(f"Error loading checkpoint: {e}")
-        return None
-
-def evaluate(model, dataloader, device):
-    model.eval()
-    all_outputs = []
-    with torch.no_grad():
-        for batch in dataloader:
-            batch = batch.to(device)
-            local_embed = model.local_encoder(batch)
-            global_embed = model.global_interactor(batch, local_embed)
-            all_outputs.append(global_embed.cpu())
-    return torch.cat(all_outputs, dim=1)  # [F, N, D]
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, required=True, help='Dataset root path')
-    parser.add_argument('--batch_size', type=int, default=4)
-    parser.add_argument('--ckpt_path', type=str, required=True)
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-    args = parser.parse_args()
-
-    device = torch.device(args.device)
-
-    # Load dataset
-    dataset = HiVTDataset(args.root)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=dataset.collate_fn)
-
-    # Initialize model
-    model = HiVT()
-    model.to(device)
-
-    # Load checkpoint
-    checkpoint = load_checkpoint(args.ckpt_path, map_location=device)
-    if checkpoint is not None:
-        state_dict = checkpoint['state_dict'] if 'state_dict' in checkpoint else checkpoint
-        # Load non-strict to ignore missing/unexpected keys
-        model.load_state_dict(state_dict, strict=False)
-        print("Checkpoint loaded successfully (non-strict).")
-
-    # Run evaluation
-    outputs = evaluate(model, dataloader, device)
-    print("Evaluation done. Output shape:", outputs.shape)
+from models.hivt import HiVT
 
 if __name__ == '__main__':
-    main()
+    pl.seed_everything(2022)
+
+    root = './datasets'
+    batch_size = 4
+    num_workers = 8
+    pin_memory = True
+    persistent_workers = True
+    gpus = 1
+    ckpt_path = './checkpoints/epoch=63-step=411903.ckpt'
+
+    # -------------------------
+    # Load full Lightning checkpoint safely
+    # -------------------------
+    # Allowlist the ModelCheckpoint class for unpickling
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    from torch.serialization import safe_globals
+    with safe_globals([ModelCheckpoint]):
+        checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+
+    # -------------------------
+    # Initialize model with matching hyperparameters
+    # -------------------------
+    model = HiVT(
+        historical_steps=20,
+        future_steps=30,
+        num_modes=6,
+        rotate=True,
+        node_dim=2,
+        edge_dim=2,
+        embed_dim=64,        # must match trained model
+        num_heads=8,
+        dropout=0.1,
+        num_temporal_layers=4,
+        num_global_layers=3,
+        local_radius=50,     # must match trained model
+        parallel=False,
+        lr=5e-4,
+        weight_decay=1e-4,
+        T_max=64
+    )
+
+    # -------------------------
+    # Load state_dict with strict=False to ignore missing/unexpected keys
+    # -------------------------
+    state_dict = checkpoint['state_dict']
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+    if gpus > 0:
+        model = model.cuda()
+
+    # -------------------------
+    # Validation dataloader
+    # -------------------------
+    val_dataset = ArgoverseV1Dataset(root=root, split='val', local_radius=model.hparams.local_radius)
+    dataloader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers
+    )
+
+    # -------------------------
+    # Run evaluation
+    # -------------------------
+    with torch.no_grad():
+        for batch_idx, data in enumerate(dataloader):
+            if gpus > 0:
+                data = data.to('cuda')
+            y_hat, pi = model(data)
+            print(f'Batch {batch_idx} processed.')
