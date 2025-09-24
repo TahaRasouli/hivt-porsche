@@ -12,19 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from itertools import permutations
-from itertools import product
+from itertools import permutations, product
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import torch
-from argoverse.map_representation.map_api import ArgoverseMap
-from torch_geometric.data import Data
-from torch_geometric.data import Dataset
+from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
 
 from utils import TemporalData
+
+# Make Argoverse optional
+try:
+    from argoverse.map_representation.map_api import ArgoverseMap
+except ImportError:
+    ArgoverseMap = None
+
 
 
 class ArgoverseV1Dataset(Dataset):
