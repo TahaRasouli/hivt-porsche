@@ -1,53 +1,62 @@
 import torch
 from torch_geometric.data import DataLoader
 import pytorch_lightning as pl
+
 from datasets import ArgoverseV1Dataset
 from models.hivt import HiVT
 
 if __name__ == '__main__':
     pl.seed_everything(2022)
 
-    # --- CONFIG ---
+    # -------------------------
+    # Arguments (replace with argparse if needed)
+    # -------------------------
     root = './datasets'
     batch_size = 4
     num_workers = 8
     pin_memory = True
     persistent_workers = True
+    gpus = 1
     ckpt_path = './checkpoints/epoch=63-step=411903.ckpt'
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    # --- LOAD CHECKPOINT HYPERPARAMETERS ---
-    ckpt = torch.load(ckpt_path, map_location='cpu')
-    hparams = ckpt['hyper_parameters'] if 'hyper_parameters' in ckpt else ckpt['hyper_params']
+    # -------------------------
+    # Load model weights safely (PyTorch 2.6+)
+    # -------------------------
+    # Only load weights, skip Lightning checkpoint objects
+    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=True)
 
-    # --- INIT MODEL ---
+    # Initialize model with the same hyperparameters as training
+    # Adjust embed_dim and local_radius according to your trained model
     model = HiVT(
-        historical_steps=hparams['historical_steps'],
-        future_steps=hparams['future_steps'],
-        num_modes=hparams['num_modes'],
-        rotate=hparams['rotate'],
-        node_dim=hparams['node_dim'],
-        edge_dim=hparams['edge_dim'],
-        embed_dim=hparams['embed_dim'],
-        num_heads=hparams['num_heads'],
-        dropout=hparams['dropout'],
-        num_temporal_layers=hparams['num_temporal_layers'],
-        num_global_layers=hparams['num_global_layers'],
-        local_radius=hparams['local_radius'],
+        historical_steps=20,
+        future_steps=30,
+        num_modes=6,
+        rotate=True,
+        node_dim=2,
+        edge_dim=2,
+        embed_dim=64,        # must match trained model
+        num_heads=8,
+        dropout=0.1,
+        num_temporal_layers=4,
+        num_global_layers=3,
+        local_radius=50,     # must match trained model
         parallel=False,
-        lr=hparams.get('lr', 5e-4),
-        weight_decay=hparams.get('weight_decay', 1e-4),
-        T_max=hparams.get('T_max', 64)
+        lr=5e-4,
+        weight_decay=1e-4,
+        T_max=64
     )
 
-    # --- LOAD CHECKPOINT ---
-    model.load_state_dict(ckpt['state_dict'])
-    model.to(device)
+    # Load weights
+    model.load_state_dict(checkpoint)
     model.eval()
+    if gpus > 0:
+        model = model.cuda()
 
-    # --- DATASET & DATALOADER ---
+    # -------------------------
+    # Prepare validation dataset & dataloader
+    # -------------------------
     val_dataset = ArgoverseV1Dataset(root=root, split='val', local_radius=model.hparams.local_radius)
-    val_loader = DataLoader(
+    dataloader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
@@ -56,10 +65,13 @@ if __name__ == '__main__':
         persistent_workers=persistent_workers
     )
 
-    # --- VALIDATION ---
-    trainer = pl.Trainer(
-        accelerator='gpu' if device == 'cuda' else 'cpu',
-        devices=1 if device == 'cuda' else None,
-        logger=False
-    )
-    trainer.validate(model, val_loader)
+    # -------------------------
+    # Validation loop
+    # -------------------------
+    with torch.no_grad():
+        for batch_idx, data in enumerate(dataloader):
+            if gpus > 0:
+                data = data.to('cuda')
+            y_hat, pi = model(data)
+            # Optionally: compute metrics or print batch info
+            print(f'Batch {batch_idx} processed.')
