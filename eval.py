@@ -4,6 +4,8 @@ from models.hivt import HiVT
 from utils import TemporalData
 import json
 from torch.serialization import safe_globals
+from torch_geometric.data import Data
+from torch_geometric.data.data import DataEdgeAttr
 
 
 # -------------------------
