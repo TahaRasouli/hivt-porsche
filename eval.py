@@ -23,8 +23,8 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.serialization import safe_globals
 
-with safe_globals([ModelCheckpoint]):
-    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+with safe_globals([TemporalData, Data, DataEdgeAttr]):
+    data = torch.load(scene_file, weights_only=False)
 
 model = HiVT(
     historical_steps=20,
