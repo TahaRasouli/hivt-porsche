@@ -1,17 +1,18 @@
-import os
 import torch
+import os
+import json
 from models.hivt import HiVT
 from utils import TemporalData
-import json
-from torch.serialization import safe_globals
 from torch_geometric.data import Data
 from torch_geometric.data.data import DataEdgeAttr
+from torch.serialization import safe_globals
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 # -------------------------
 # Settings
 # -------------------------
-scene_file = './datasets/val/processed/2645.pt'
+scene_file = './datasets/val/processed/2645.pt'  # single scene
 ckpt_path = './checkpoints/epoch=63-step=411903.ckpt'
 results_dir = './results'
 os.makedirs(results_dir, exist_ok=True)
@@ -20,11 +21,8 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # -------------------------
 # Load model checkpoint
 # -------------------------
-from pytorch_lightning.callbacks import ModelCheckpoint
-from torch.serialization import safe_globals
-
-with safe_globals([TemporalData, Data, DataEdgeAttr]):
-    data = torch.load(scene_file, weights_only=False)
+with safe_globals([ModelCheckpoint]):
+    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
 
 model = HiVT(
     historical_steps=20,
@@ -49,26 +47,10 @@ model.eval()
 model.to(device)
 
 # -------------------------
-# Load single scene
+# Load single scene safely (with lane + actor info)
 # -------------------------
-with safe_globals([TemporalData]):
-    data: TemporalData = torch.load(scene_file)
-scene_id = os.path.splitext(os.path.basename(scene_file))[0]
-
-# Load corresponding lane data if available
-lane_file = os.path.join(os.path.dirname(scene_file), "processed_lanes", f"{scene_id}_lanes.pt")
-if os.path.exists(lane_file):
-    lane_data = torch.load(lane_file)
-    data.lane_vectors = lane_data["lane_vectors"]
-    data.is_intersections = lane_data["is_intersections"]
-    data.turn_directions = lane_data["turn_directions"]
-    data.traffic_controls = lane_data["traffic_controls"]
-    data.lane_actor_index = lane_data["lane_actor_index"]
-    data.lane_actor_vectors = lane_data["lane_actor_vectors"]
-    data.origin = lane_data["origin"]
-    data.theta = lane_data["theta"]
-    data.city = lane_data["city"]
-
+with safe_globals([TemporalData, Data, DataEdgeAttr]):
+    data: TemporalData = torch.load(scene_file, weights_only=False)
 data = data.to(device)
 
 # -------------------------
@@ -78,8 +60,9 @@ with torch.no_grad():
     y_hat, pi = model(data)
 
 # -------------------------
-# Save results
+# Save results (including lanes)
 # -------------------------
+scene_id = os.path.splitext(os.path.basename(scene_file))[0]
 output_file = os.path.join(results_dir, f'scene_{scene_id}.json')
 
 sample_result = {
@@ -96,4 +79,4 @@ sample_result = {
 with open(output_file, 'w') as f:
     json.dump(sample_result, f, indent=2)
 
-print(f"Results saved to {output_file}")
+print(f"✅ Results saved to {output_file}")
