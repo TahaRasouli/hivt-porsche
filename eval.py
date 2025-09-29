@@ -1,13 +1,15 @@
+import os
 import torch
 from models.hivt import HiVT
 from utils import TemporalData
-import os
 import json
+from torch.serialization import safe_globals
+
 
 # -------------------------
 # Settings
 # -------------------------
-scene_file = './datasets/val/processed/2645.pt'  # change to your scene
+scene_file = './datasets/val/processed/2645.pt'
 ckpt_path = './checkpoints/epoch=63-step=411903.ckpt'
 results_dir = './results'
 os.makedirs(results_dir, exist_ok=True)
@@ -18,6 +20,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # -------------------------
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.serialization import safe_globals
+
 with safe_globals([ModelCheckpoint]):
     checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
 
@@ -46,7 +49,24 @@ model.to(device)
 # -------------------------
 # Load single scene
 # -------------------------
-data: TemporalData = torch.load(scene_file)
+with safe_globals([TemporalData]):
+    data: TemporalData = torch.load(scene_file)
+scene_id = os.path.splitext(os.path.basename(scene_file))[0]
+
+# Load corresponding lane data if available
+lane_file = os.path.join(os.path.dirname(scene_file), "processed_lanes", f"{scene_id}_lanes.pt")
+if os.path.exists(lane_file):
+    lane_data = torch.load(lane_file)
+    data.lane_vectors = lane_data["lane_vectors"]
+    data.is_intersections = lane_data["is_intersections"]
+    data.turn_directions = lane_data["turn_directions"]
+    data.traffic_controls = lane_data["traffic_controls"]
+    data.lane_actor_index = lane_data["lane_actor_index"]
+    data.lane_actor_vectors = lane_data["lane_actor_vectors"]
+    data.origin = lane_data["origin"]
+    data.theta = lane_data["theta"]
+    data.city = lane_data["city"]
+
 data = data.to(device)
 
 # -------------------------
@@ -58,7 +78,6 @@ with torch.no_grad():
 # -------------------------
 # Save results
 # -------------------------
-scene_id = os.path.splitext(os.path.basename(scene_file))[0]
 output_file = os.path.join(results_dir, f'scene_{scene_id}.json')
 
 sample_result = {
