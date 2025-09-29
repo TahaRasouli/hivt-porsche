@@ -1,17 +1,4 @@
 import os
-import shutil
-from itertools import permutations
-from typing import Dict, List, Optional
-import numpy as np
-import torch
-from torch_geometric.data import Data
-from tqdm import tqdm
-
-
-# Local imports
-from utils import TemporalData
-
-import os
 import torch
 import pandas as pd
 from tqdm import tqdm
@@ -21,7 +8,7 @@ from argoverse.map_representation.map_api import ArgoverseMap
 from datasets.argoverse_v1_dataset import process_argoverse, TemporalData 
 
 ROOT_DIR = os.path.expanduser("~/hivt-porsche/datasets")
-SPLIT = "sample"  # or "train"/"val"
+SPLIT = "val"  # or "train"/"val"
 SAVE_DIR = os.path.join(ROOT_DIR, SPLIT, "processed_lanes")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
